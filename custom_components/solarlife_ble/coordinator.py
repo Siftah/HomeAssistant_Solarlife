@@ -41,24 +41,34 @@ class SolarLifeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float | int
 
     async def _async_update_data(self) -> dict[str, float | int]:
         """Poll the controller."""
+        _LOGGER.debug("Looking up connectable SolarLife BLE device %s", self.address)
         device = bluetooth.async_ble_device_from_address(
             self.hass, self.address, connectable=True
         )
         if device is None:
+            _LOGGER.debug(
+                "No connectable Bluetooth route is currently available for %s",
+                self.address,
+            )
             raise UpdateFailed(
                 f"Bluetooth device {self.address} is not available from a connectable adapter"
             )
 
         try:
-            return await self._async_read_device(device)
+            data = await self._async_read_device(device)
         except (asyncio.TimeoutError, BleakError, SolarLifeProtocolError) as err:
+            _LOGGER.debug("SolarLife BLE update failed for %s", self.address, exc_info=True)
             raise UpdateFailed(f"Failed to read SolarLife controller: {err}") from err
+
+        _LOGGER.debug("Read %d SolarLife values from %s", len(data), self.address)
+        return data
 
     async def _async_read_device(self, device: BLEDevice) -> dict[str, float | int]:
         """Read data from a BLE device."""
         disconnect_callback: Callable[[BleakClientWithServiceCache], None] = (
             lambda _client: None
         )
+        _LOGGER.debug("Connecting to SolarLife BLE device %s", self.address)
         client = await establish_connection(
             BleakClientWithServiceCache,
             device,
@@ -72,6 +82,8 @@ class SolarLifeDataUpdateCoordinator(DataUpdateCoordinator[dict[str, float | int
         )
 
         try:
+            _LOGGER.debug("Connected to SolarLife BLE device %s; reading data", self.address)
             return await async_read_controller_data(client)
         finally:
+            _LOGGER.debug("Disconnecting from SolarLife BLE device %s", self.address)
             await client.disconnect()

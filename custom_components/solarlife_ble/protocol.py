@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
     from bleak import BleakClient
+
+_LOGGER = logging.getLogger(__name__)
 
 NOTIFY_HANDLE: Final = 0x11
 ENABLE_NOTIFY_HANDLE: Final = 0x12
@@ -68,16 +71,29 @@ async def async_read_controller_data(client: "BleakClient") -> dict[str, float |
             return
 
         receive_buffer.extend(data)
+        _LOGGER.debug(
+            "Received SolarLife BLE notification chunk: %d bytes, %d buffered",
+            len(data),
+            len(receive_buffer),
+        )
         if len(receive_buffer) < 3:
             return
 
         expected_length = receive_buffer[2] + 5
         if len(receive_buffer) >= expected_length:
+            _LOGGER.debug(
+                "Received complete SolarLife frame: %d bytes", expected_length
+            )
             future.set_result(bytes(receive_buffer[:expected_length]))
 
+    _LOGGER.debug("Starting SolarLife notifications on handle 0x%02x", NOTIFY_HANDLE)
     await client.start_notify(NOTIFY_HANDLE, notification_handler)
     try:
+        _LOGGER.debug(
+            "Enabling SolarLife notifications on handle 0x%02x", ENABLE_NOTIFY_HANDLE
+        )
         await client.write_gatt_char(ENABLE_NOTIFY_HANDLE, b"\x01\x00", response=True)
+        _LOGGER.debug("Writing SolarLife live-data request to handle 0x%02x", WRITE_HANDLE)
         await client.write_gatt_char(
             WRITE_HANDLE,
             _build_request(
@@ -90,6 +106,7 @@ async def async_read_controller_data(client: "BleakClient") -> dict[str, float |
         )
         frame = await asyncio.wait_for(future, REQUEST_TIMEOUT)
     finally:
+        _LOGGER.debug("Stopping SolarLife notifications on handle 0x%02x", NOTIFY_HANDLE)
         await client.stop_notify(NOTIFY_HANDLE)
 
     return parse_live_data_frame(frame, LIVE_DATA_START)
