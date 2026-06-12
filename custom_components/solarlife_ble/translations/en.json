@@ -14,7 +14,9 @@
       "invalid_address": "Enter an address like AA:BB:CC:DD:EE:FF."
     },
     "abort": {
-      "already_configured": "This SolarLife controller is already configured."
+      "already_configured": "This SolarLife controller is already configured.",
+      "not_connectable": "This SolarLife controller was discovered through a Bluetooth adapter that cannot make outgoing connections.",
+      "not_solarlife_device": "The discovered Bluetooth device does not look like a SolarLife controller."
     }
   },
   "entity": {

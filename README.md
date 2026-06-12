@@ -29,8 +29,13 @@ Copy `custom_components/solarlife_ble` into your Home Assistant
 
 ## Configure
 
-Add the integration from **Settings > Devices & services > Add integration** and
-enter the Bluetooth MAC address of the controller.
+Home Assistant should discover controllers that advertise as `SolarLife` with
+manufacturer ID `928` and service UUID `0000fee7-0000-1000-8000-00805f9b34fb`
+or `4953ff00-fe7d-4ae5-8fa9-9fafd205e455`.
+
+If discovery does not appear, add the integration from
+**Settings > Devices & services > Add integration** and enter the Bluetooth MAC
+address of the controller.
 
 You need a connectable Bluetooth path to the controller. A local Bluetooth
 adapter works, and an ESPHome Bluetooth proxy should also work when it supports
@@ -52,9 +57,13 @@ one GitHub release after validation passes.
 
 ## Notes
 
-The first version uses manual MAC address setup because SolarLife controller
-advertisements vary by clone. Bluetooth discovery can be added once the device
-advertisement name, service UUIDs, or manufacturer data are known.
+Known SolarLife advertisements look like this:
+
+- name: `SolarLife`
+- manufacturer ID: `928`
+- manufacturer data: controller MAC address bytes
+- service UUIDs: `0000fee7-0000-1000-8000-00805f9b34fb`,
+  `4953ff00-fe7d-4ae5-8fa9-9fafd205e455`
 
 The integration polls register block `0x3000` through `0x307B` using the same
 GATT handles and Modbus CRC/request framing as the original project.
