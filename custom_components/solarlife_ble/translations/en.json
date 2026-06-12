@@ -1,0 +1,75 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SolarLife BLE",
+        "description": "Enter the Bluetooth MAC address of the SolarLife controller.",
+        "data": {
+          "address": "Bluetooth address",
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "invalid_address": "Enter an address like AA:BB:CC:DD:EE:FF."
+    },
+    "abort": {
+      "already_configured": "This SolarLife controller is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_voltage": {
+        "name": "Battery voltage"
+      },
+      "battery_current": {
+        "name": "Battery current"
+      },
+      "battery_power": {
+        "name": "Battery power"
+      },
+      "battery_remaining_capacity": {
+        "name": "Battery remaining capacity"
+      },
+      "solar_voltage": {
+        "name": "Solar voltage"
+      },
+      "solar_current": {
+        "name": "Solar current"
+      },
+      "solar_power": {
+        "name": "Solar power"
+      },
+      "load_voltage": {
+        "name": "Load voltage"
+      },
+      "load_current": {
+        "name": "Load current"
+      },
+      "load_power": {
+        "name": "Load power"
+      },
+      "daily_production": {
+        "name": "Daily production"
+      },
+      "total_production": {
+        "name": "Total production"
+      },
+      "daily_consumption": {
+        "name": "Daily consumption"
+      },
+      "total_consumption": {
+        "name": "Total consumption"
+      },
+      "env_temperature": {
+        "name": "Ambient temperature"
+      },
+      "sys_temperature": {
+        "name": "Controller temperature"
+      },
+      "running_days": {
+        "name": "Running days"
+      }
+    }
+  }
+}

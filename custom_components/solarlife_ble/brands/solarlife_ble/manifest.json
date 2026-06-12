@@ -1,0 +1,6 @@
+{
+  "domain": "solarlife_ble",
+  "integrations": ["solarlife_ble"],
+  "iot_standards": [],
+  "name": "SolarLife BLE"
+}
