@@ -41,6 +41,21 @@ You need a connectable Bluetooth path to the controller. A local Bluetooth
 adapter works, and an ESPHome Bluetooth proxy should also work when it supports
 outgoing connections.
 
+## Troubleshooting
+
+If setup or updates report that no backend has an available connection slot, Home
+Assistant has discovered the controller but cannot currently open an active BLE
+connection through any proxy or adapter. Common causes are:
+
+- the controller is near the edge of Bluetooth range
+- the ESPHome proxy has no free active connection slots
+- the last advertisement is stale, so Home Assistant no longer has a fresh
+  connectable path
+
+Move a connectable proxy closer to the controller, reduce other active BLE
+connections on that proxy, or add another ESPHome Bluetooth proxy near the
+controller.
+
 ## HACS readiness
 
 This repository is structured as a HACS integration repository:

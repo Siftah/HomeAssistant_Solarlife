@@ -212,4 +212,6 @@ class SolarLifeSensor(CoordinatorEntity[SolarLifeDataUpdateCoordinator], SensorE
     @property
     def native_value(self) -> float | int | None:
         """Return the native value."""
+        if self.coordinator.data is None:
+            return None
         return self.coordinator.data.get(self.entity_description.value_key)
