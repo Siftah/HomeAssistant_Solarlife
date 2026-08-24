@@ -12,13 +12,16 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 NOTIFY_HANDLE: Final = 0x11
-ENABLE_NOTIFY_HANDLE: Final = 0x12
 WRITE_HANDLE: Final = 0x14
 
 SLAVE_ID: Final = 0x01
 READ_INPUT_REGISTERS: Final = 0x04
 LIVE_DATA_START: Final = 0x3000
 LIVE_DATA_COUNT: Final = 0x007C
+# a Modbus function-4 reply carries two bytes per register, plus
+# slave id + function + byte count + 2 CRC bytes
+EXPECTED_BYTE_COUNT: Final = LIVE_DATA_COUNT * 2
+EXPECTED_FRAME_LEN: Final = EXPECTED_BYTE_COUNT + 5
 
 REQUEST_TIMEOUT: Final = 20
 
@@ -60,6 +63,97 @@ def _build_request(slave_id: int, function_code: int, address: int, count: int) 
     return bytes(payload)
 
 
+
+def _find_frame(buffer: bytearray) -> bytes | None:
+    """Return the first complete, CRC-valid response frame in `buffer`.
+
+    The controller can leave bytes from an earlier exchange in its transmit
+    buffer, so the first notification chunk is NOT guaranteed to be the start of
+    our response -- a stray 5-byte fragment ahead of the real 253-byte frame was
+    observed in practice. The old code took `buffer[2]` as the byte count no
+    matter what, so one stray leading byte desynchronised the whole read: it
+    either sliced the wrong window (CRC failure) or waited for a length that
+    never arrived (20 s timeout).
+
+    Resynchronise on the header we know we asked for instead of trusting the
+    stream to be aligned, and confirm with the CRC before accepting a frame.
+    """
+    header = bytes((SLAVE_ID, READ_INPUT_REGISTERS, EXPECTED_BYTE_COUNT))
+    start = 0
+    while (index := buffer.find(header, start)) != -1:
+        if len(buffer) - index < EXPECTED_FRAME_LEN:
+            return None  # header found, body still arriving
+        frame = bytes(buffer[index : index + EXPECTED_FRAME_LEN])
+        if _crc_modbus(frame[:-2]) == (frame[-2] | (frame[-1] << 8)):
+            if index:
+                _LOGGER.debug("Skipped %d stray leading byte(s)", index)
+            return frame
+        start = index + 1  # header pattern occurring inside the payload
+    return None
+
+
+def _dump_services(client: "BleakClient") -> None:
+    """Log the full GATT table once, at debug level."""
+    for service in client.services:
+        _LOGGER.debug("service %s (%s)", service.uuid, service.description)
+        for char in service.characteristics:
+            _LOGGER.debug(
+                "  char handle=0x%02x uuid=%s props=%s",
+                char.handle,
+                char.uuid,
+                ",".join(char.properties),
+            )
+            for desc in char.descriptors:
+                _LOGGER.debug("    desc handle=0x%02x uuid=%s", desc.handle, desc.uuid)
+
+
+def _resolve_notify_char(client: "BleakClient"):
+    """Return the characteristic that carries controller responses.
+
+    Handles are only stable for a given firmware, so prefer the documented
+    handle but fall back to the first notify/indicate characteristic.
+    """
+    if _LOGGER.isEnabledFor(logging.DEBUG):
+        _dump_services(client)
+    char = client.services.get_characteristic(NOTIFY_HANDLE)
+    if char is not None and (
+        "notify" in char.properties or "indicate" in char.properties
+    ):
+        return char
+    for service in client.services:
+        for candidate in service.characteristics:
+            if "notify" in candidate.properties or "indicate" in candidate.properties:
+                _LOGGER.debug(
+                    "Falling back to notify characteristic 0x%02x (%s)",
+                    candidate.handle,
+                    candidate.uuid,
+                )
+                return candidate
+    raise SolarLifeProtocolError("no notify characteristic found on the controller")
+
+
+def _resolve_write_char(client: "BleakClient"):
+    """Return the characteristic used to send Modbus requests."""
+    char = client.services.get_characteristic(WRITE_HANDLE)
+    if char is not None and (
+        "write" in char.properties or "write-without-response" in char.properties
+    ):
+        return char
+    for service in client.services:
+        for candidate in service.characteristics:
+            if (
+                "write" in candidate.properties
+                or "write-without-response" in candidate.properties
+            ):
+                _LOGGER.debug(
+                    "Falling back to write characteristic 0x%02x (%s)",
+                    candidate.handle,
+                    candidate.uuid,
+                )
+                return candidate
+    raise SolarLifeProtocolError("no writable characteristic found on the controller")
+
+
 async def async_read_controller_data(client: "BleakClient") -> dict[str, float | int]:
     """Read and parse a full SolarLife live data frame."""
     loop = asyncio.get_running_loop()
@@ -76,38 +170,44 @@ async def async_read_controller_data(client: "BleakClient") -> dict[str, float |
             len(data),
             len(receive_buffer),
         )
-        if len(receive_buffer) < 3:
-            return
+        frame = _find_frame(receive_buffer)
+        if frame is not None:
+            _LOGGER.debug("Received complete SolarLife frame: %d bytes", len(frame))
+            future.set_result(frame)
 
-        expected_length = receive_buffer[2] + 5
-        if len(receive_buffer) >= expected_length:
-            _LOGGER.debug(
-                "Received complete SolarLife frame: %d bytes", expected_length
-            )
-            future.set_result(bytes(receive_buffer[:expected_length]))
+    notify_char = _resolve_notify_char(client)
+    write_char = _resolve_write_char(client)
+    _LOGGER.debug(
+        "SolarLife GATT resolved: notify handle 0x%02x (%s), write handle 0x%02x (%s)",
+        notify_char.handle,
+        notify_char.uuid,
+        write_char.handle,
+        write_char.uuid,
+    )
 
-    _LOGGER.debug("Starting SolarLife notifications on handle 0x%02x", NOTIFY_HANDLE)
-    await client.start_notify(NOTIFY_HANDLE, notification_handler)
+    await client.start_notify(notify_char, notification_handler)
     try:
+        # NOTE: the original code wrote b"\x01\x00" to handle 0x12 here. 0x12 is
+        # the CCCD *descriptor* of the notify characteristic, not a characteristic,
+        # so bleak raises BleakCharacteristicNotFoundError. start_notify() already
+        # writes that descriptor, so the extra write is redundant as well as wrong.
         _LOGGER.debug(
-            "Enabling SolarLife notifications on handle 0x%02x", ENABLE_NOTIFY_HANDLE
+            "Writing SolarLife live-data request to handle 0x%02x", write_char.handle
         )
-        await client.write_gatt_char(ENABLE_NOTIFY_HANDLE, b"\x01\x00", response=True)
-        _LOGGER.debug("Writing SolarLife live-data request to handle 0x%02x", WRITE_HANDLE)
         await client.write_gatt_char(
-            WRITE_HANDLE,
+            write_char,
             _build_request(
                 SLAVE_ID,
                 READ_INPUT_REGISTERS,
                 LIVE_DATA_START,
                 LIVE_DATA_COUNT,
             ),
-            response=True,
+            response="write" in write_char.properties,
         )
         frame = await asyncio.wait_for(future, REQUEST_TIMEOUT)
     finally:
-        _LOGGER.debug("Stopping SolarLife notifications on handle 0x%02x", NOTIFY_HANDLE)
-        await client.stop_notify(NOTIFY_HANDLE)
+        _LOGGER.debug("Stopping SolarLife notifications on handle 0x%02x", notify_char.handle)
+        await client.stop_notify(notify_char)
 
     return parse_live_data_frame(frame, LIVE_DATA_START)
 
